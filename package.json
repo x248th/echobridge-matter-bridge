@@ -1,0 +1,12 @@
+{
+  "name": "echobridge-matter-bridge",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@matter/main": "0.17.6",
+    "qrcode": "1.5.4"
+  },
+  "scripts": {
+    "start": "node src/index.js"
+  }
+}

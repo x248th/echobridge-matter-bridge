@@ -1,0 +1,41 @@
+[Unit]
+Description=EchoBridge Matter Bridge (addon)
+# 本体とネット到達後に開始。ただし Requires= は入れない設計判断（HAP版と同じ）:
+# 本体restart時にアドオンを道連れにしない（SSE再接続で自律復旧できることはM3で実証済み）。
+# 本体不達で起動した場合は index.js が異常終了 → Restart=on-failure が起動順を担保する。
+After=network-online.target echobridge-shortcut-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%USER%
+WorkingDirectory=%REPO%
+# 起動時ローテ: error_addon.log が1MB超なら .old へ退避（世代1・上書き）。
+# systemdがStandardErrorでファイルを開く前に走るためappendのinode問題を踏まない。
+# クラッシュループでも再起動毎に走るので最悪1MB+αで頭打ち。%%s はunit内で%sへ復元される。
+ExecStartPre=/bin/sh -c '[ -f %REPO%/data/error_addon.log ] && [ $(stat -c%%s %REPO%/data/error_addon.log) -gt 1048576 ] && mv -f %REPO%/data/error_addon.log %REPO%/data/error_addon.log.old || true'
+ExecStart=%NODE% src/index.js
+# 本体URLの注入点（CLAUDE.md §3: ハードコード禁止・既定は同一機のループバック）。
+# 本体を別機に置く構成では下の data/env が同名変数を上書きする（後勝ち）。
+Environment=ECHOBRIDGE_URL=http://127.0.0.1:8099
+# 日常ログ(INFO/NOTICE)はstdout→journal(RAM・揮発)。WARN以上のstderrだけを
+# data/error_addon.log へ永続＝本体のerror.log思想(ERROR+必要WARNINGのみ永続)と同型。
+# matter.js は WARN→console.warn / ERROR→console.error（Nodeではどちらもstderr）、
+# 当方のコードも WARN 相当は console.warn を使うため、この1行で「WARN以上だけ永続」が成立する。
+# ファイル名は全アドオン共通で error_addon.log 固定（本体診断が addons/*/data/ を1globで拾う規約）。
+StandardOutput=journal
+StandardError=append:%REPO%/data/error_addon.log
+# data/env は本体を別機に置く構成でのみ使う（ECHOBRIDGE_URL= と ECHOBRIDGE_TOKEN=）。
+# 同一機なら本体がループバック接続を認証の検査対象外にするためトークンは不要＝env自体が不要。
+# "-" でファイル不在でも起動する（同一機運用では不在が既定）。
+EnvironmentFile=-%REPO%/data/env
+Restart=on-failure
+RestartSec=5
+# cgroup実効化後の実測に基づく（起動直後RSS≈120MiB・MemoryCurrentは
+# node_modulesページキャッシュ込み≈180MiB・上限接近時はキャッシュが先に回収される）。
+MemoryMax=300M
+# 本体(未設定=0)より先にkillされる側＝「逼迫時に死ぬのはアドオン側」(CLAUDE.md §4)の実装。
+OOMScoreAdjust=500
+
+[Install]
+WantedBy=multi-user.target
