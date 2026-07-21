@@ -131,7 +131,8 @@ cat <<EOF
     状態:     systemctl status matter-bridge
     ログ:     journalctl -u matter-bridge -f
     異常ログ: data/error_addon.log（WARN以上のみ・起動時に1MB超で.oldへローテ）
-    ペアリング: 管理画面(http://echobridge.local:8080)の「Matter」カードにQRとPINが出ます
+    ペアリング: 管理画面(http://echobridge.local:8080)の「スマートホーム連携（β版）」カードに
+                QRとPINが出ます
                 （PINは data/status.json にも入ります・QRは data/qr.svg）
 
     本体と同じ機体で動かす場合、トークンの設定は不要です（本体のトークン認証が

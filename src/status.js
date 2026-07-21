@@ -13,7 +13,12 @@ import QRCode from "qrcode";
 // service は systemdユニット名かつ本体の ADDON_SERVICE_WHITELIST と一致必須（不一致＝トグル不能）。
 const SERVICE = "matter-bridge";
 // display_name は本体の走査ベース表示に使う種別名（HAP版アドオンの "HomeKit" と対の位置づけ）。
-const DISPLAY_NAME = "Matter";
+// ★これは本体WebUI上の「製品UIの表示名」専用。未認証状態で "Matter" ブランドを製品UIに
+// 掲出しないため M10 で "スマートホーム連携（β版）" へ変更した。
+// Matterプロトコル上の名前（basicInformation の vendorName/productName/nodeLabel）は
+// src/identity.js が単一集約点で、ここと定数を共有しない＝連動しない。プロトコル名を
+// 変えるとペアリング済みfabricへ影響し再ペアリングを要する恐れがあるため、意図的に不変。
+const DISPLAY_NAME = "スマートホーム連携（β版）";
 // Apple Keychain（CSA登録VID 0x1384）: iOSがペアリング資格情報の保管用に張る帳簿fabric。
 // ホーム構成/ハブ/家族共有とは無関係で、1ホームのペアリングでも必ず1つ増える（M4でfabric#2=0x1384
 // を実測・当時は正体不明だった）。「ペアリングシステム数」からは除外して数える。
