@@ -63,8 +63,13 @@ export function countPairedClients(fabrics) {
   return (fabrics ?? []).filter((f) => !KEYCHAIN_VENDOR_IDS.includes(Number(f.vendorId))).length;
 }
 
-/** status.json の中身（updated_at を除く）。差分判定の対象でもある。 */
-export function buildStatus({ version, pairedClients, fabricsTotal, pin }) {
+/**
+ * status.json の中身（updated_at を除く）。差分判定の対象でもある。
+ * upstream_ok / upstream_last_ok_at は M11 で追加（S2-1候補④のmatter半分）。
+ * 本体WebUI側の描画は別セッション(W12)の管轄で、ここは**フィールドを供給するのみ**。
+ * 本体が読まなくても壊れない（本体は既知キーだけを見て未知キーは無視する契約）。
+ */
+export function buildStatus({ version, pairedClients, fabricsTotal, pin, upstream }) {
   return {
     service: SERVICE,
     display_name: DISPLAY_NAME,
@@ -74,6 +79,11 @@ export function buildStatus({ version, pairedClients, fabricsTotal, pin }) {
     paired_label: PAIRED_LABEL,
     fabrics_total: fabricsTotal,
     pin,
+    // 本体API(:8099)への到達性。true=直近の全同期が成功 / false=不達。
+    // アドオンだけ生きていて本体が落ちている状態を本体WebUIから見分けるための供給。
+    upstream_ok: upstream?.ok ?? null,
+    // 最後に本体APIへ到達できた時刻(ISO8601)。不達中も「いつまで生きていたか」を保つ。
+    upstream_last_ok_at: upstream?.lastOkAt ?? null,
   };
 }
 
@@ -104,11 +114,12 @@ export async function writeQr(dataDir, qrPairingCode) {
 
 /**
  * 状態ファイル群の書き出しを開始する。
- * 起動完了後（server.start・pairingCodes取得後）に1回書き、以後は fabric変化イベントで更新する。
+ * 起動完了後（server.start・pairingCodes取得後）に1回書き、以後は fabric変化イベントと
+ * 本体接続状態の反転（sync が refresh を呼ぶ）で更新する。
  * 差分が無ければ書かない（本体の書き込み抑制思想に合わせSD消耗を避ける）。
- * 返り値: 購読を解除する関数。
+ * 返り値: { stop: 購読解除, refresh: 再評価して差分があれば書く }。
  */
-export async function startStatusWriter({ server, repoRoot, dataDir }) {
+export async function startStatusWriter({ server, repoRoot, dataDir, upstream = null }) {
   const version = await readVersion(repoRoot);
   if (version === "unknown") {
     warn("WARN VERSIONファイルを読めず version=unknown（本体はこのカードを描画しない）");
@@ -125,6 +136,7 @@ export async function startStatusWriter({ server, repoRoot, dataDir }) {
       pairedClients: countPairedClients(fabrics),
       fabricsTotal: fabrics.length,
       pin,
+      upstream,
     });
     if (JSON.stringify(current) === JSON.stringify(last)) return;
     try {
@@ -145,5 +157,11 @@ export async function startStatusWriter({ server, repoRoot, dataDir }) {
     update().catch((e) => warn(`WARN status更新に失敗（継続）: ${e?.message ?? e}`));
   };
   server.events.commissioning.fabricsChanged.on(onFabricsChanged);
-  return () => server.events.commissioning.fabricsChanged.off(onFabricsChanged);
+  return {
+    stop: () => server.events.commissioning.fabricsChanged.off(onFabricsChanged),
+    // sync が本体接続状態の反転時に呼ぶ。失敗しても呼び出し元へ投げ返さない。
+    refresh: () => {
+      update().catch((e) => warn(`WARN status更新に失敗（継続）: ${e?.message ?? e}`));
+    },
+  };
 }

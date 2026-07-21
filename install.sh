@@ -74,6 +74,14 @@ fi
 # 2. data/（Matterのペアリング/fabric等の永続状態・status.json・qr.svg の置き場。gitignore済み）
 mkdir -p "$REPO_DIR/data"
 chown "$USER_NAME" "$REPO_DIR/data"
+# error_addon.log の所有権と権限を揃える（M11）。
+# systemd の StandardError=append: は mode を指定できず、systemd が新規作成すると
+# root:root 644 になる（status.json・qr.svg は 600 なので非対称だった）。
+# unit側の ExecStartPre でも 600 を立てるが、そちらは User= 権限で走るため
+# 旧版が root所有で作った既存ファイルには chmod できない。ここ（root権限）で移行させる。
+touch "$REPO_DIR/data/error_addon.log"
+chown "$USER_NAME" "$REPO_DIR/data/error_addon.log"
+chmod 600 "$REPO_DIR/data/error_addon.log"
 
 # 3. unitテンプレートのプレースホルダを実パスに置換 → 配置
 echo "==> systemd unit配置: $UNIT_DST"

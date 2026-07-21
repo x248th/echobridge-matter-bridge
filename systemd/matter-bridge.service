@@ -14,6 +14,14 @@ WorkingDirectory=%REPO%
 # systemdがStandardErrorでファイルを開く前に走るためappendのinode問題を踏まない。
 # クラッシュループでも再起動毎に走るので最悪1MB+αで頭打ち。%%s はunit内で%sへ復元される。
 ExecStartPre=/bin/sh -c '[ -f %REPO%/data/error_addon.log ] && [ $(stat -c%%s %REPO%/data/error_addon.log) -gt 1048576 ] && mv -f %REPO%/data/error_addon.log %REPO%/data/error_addon.log.old || true'
+# ログの権限を data/ の他の生成物（status.json・qr.svg＝600）と揃える。
+# StandardError=append: は mode を指定できず、systemd が新規作成すると root:root 644 になる。
+# systemd がファイルを開く**前に**先回りして作成し 600 を立てることで 644 の瞬間を作らない。
+# ★この行は User=%USER% 権限で走るため、旧版が root:root で作った既存ファイルには
+#   touch も chmod も失敗する（実測: Operation not permitted）。所有権の移行は root で走る
+#   install.sh 側で行い、ここは末尾 true で**失敗しても起動を妨げない**ようにしてある
+#   （install.sh を経ずに手で起動した機体でサービスが上がらなくなるのを避けるため）。
+ExecStartPre=/bin/sh -c 'f=%REPO%/data/error_addon.log; touch "$f" 2>/dev/null; chmod 600 "$f" 2>/dev/null; true'
 ExecStart=%NODE% src/index.js
 # 本体URLの注入点（CLAUDE.md §3: ハードコード禁止・既定は同一機のループバック）。
 # 本体を別機に置く構成では下の data/env が同名変数を上書きする（後勝ち）。
