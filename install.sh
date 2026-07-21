@@ -18,6 +18,36 @@ SUDOERS_OLD="/etc/sudoers.d/echobridge-addon-matter"
 SYSTEMCTL="$(command -v systemctl)"
 NODE_BIN="$(command -v node)"
 NPM_BIN="$(command -v npm)"
+STATUS_JSON="$REPO_DIR/data/status.json"
+# 起動確認のタイムアウト（秒）。Pi4実測≈5秒に対する余裕を見て90秒。環境変数で上書き可（検証用）。
+STARTUP_TIMEOUT="${MATTER_BRIDGE_STARTUP_TIMEOUT:-90}"
+
+# 起動確認: data/status.json が「確認開始時刻より後に」書き直されるのを待つ。
+# systemctl is-active 等の起動直後判定では、起動後に遅れてクラッシュする故障
+# （S1初出荷ゲート検証ではUDP 5540の占有によるバインド失敗）が確認をすり抜ける偽陽性窓があり、
+# rc=0でインストール成功扱い→クラッシュループ→status.json不在の半導入状態、という袋小路を生む。
+# アドオンは起動完了時に必ず status.json を書く（src/status.js の startStatusWriter）ので、
+# その新規書き込みを「プロセスが実際に立ち上がりきった」ことの実証に使う。
+# 既存ファイル（前回導入時のもの）での誤検知を避けるため、restart より前に置いたマーカーと
+# mtime を比較する（-nt＝マーカーより新しい）。
+wait_for_started() {
+    local status_path="$1" marker="$2" timeout="$3" waited=0
+    echo "==> 起動確認: $status_path の新規書き込みを待つ（最大 ${timeout}秒）"
+    while [ "$waited" -lt "$timeout" ]; do
+        if [ -e "$status_path" ] && [ "$status_path" -nt "$marker" ]; then
+            echo "==> 起動確認OK: ${waited}秒でアドオンが status.json を書き直した（起動完了）"
+            return 0
+        fi
+        sleep 1
+        waited=$((waited + 1))
+    done
+    echo "!! 起動確認に失敗: ${timeout}秒以内に status.json が書き直されなかった。" >&2
+    echo "!! アドオンが起動できていない（または起動直後にクラッシュした）可能性が高い。" >&2
+    echo "!! ログを確認すること:" >&2
+    echo "!!     journalctl -u matter-bridge -n 50 --no-pager" >&2
+    echo "!!     systemctl status matter-bridge" >&2
+    return 1
+}
 
 echo "==> REPO=$REPO_DIR USER=$USER_NAME NODE=$NODE_BIN"
 
@@ -83,7 +113,17 @@ fi
 # 5. 反映＋自動起動有効化＋起動
 sudo systemctl daemon-reload
 sudo systemctl enable matter-bridge
+
+# 起動確認の基準時刻マーカーは restart より前に置く（これより新しい status.json だけを
+# 「今回の起動が書いたもの」と認める）。失敗時は exit 1＝本体インストールヘルパーの
+# 自動ロールバックが発火する側へ倒す（半導入状態の袋小路を構造的に消す）。
+STARTUP_MARKER="$(mktemp "${TMPDIR:-/tmp}/matter-bridge-startmark.XXXXXX")"
 sudo systemctl restart matter-bridge
+if ! wait_for_started "$STATUS_JSON" "$STARTUP_MARKER" "$STARTUP_TIMEOUT"; then
+    rm -f "$STARTUP_MARKER"
+    exit 1
+fi
+rm -f "$STARTUP_MARKER"
 
 cat <<EOF
 
