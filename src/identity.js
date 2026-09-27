@@ -42,5 +42,5 @@ export function softwareVersionFrom(versionString) {
   return { softwareVersion: num, softwareVersionString: str };
 }
 
-// passcode/discriminator はここでは持たない。matter.js の初回生成＋storage(data/)永続に任せる。
+// passcode/discriminator はここでは持たない。matter.js の初回生成＋storage（~/addon-data/matter-bridge/・M12）永続に任せる。
 // 商用時は per-unit ランダム化を検討（checklist宿題）。

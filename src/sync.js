@@ -9,6 +9,10 @@ const FULL_SYNC_INTERVAL_MS = 300_000; // 5分保険
 
 const ts = () => new Date().toISOString();
 const log = (...a) => console.log(`[${ts()}]`, ...a);
+// WARN相当は stderr へ（systemd の StandardError=append:data/error_addon.log に載る）。
+// ★時刻と WARN を付ける（M15・C2）。以前はここだけ素の console.warn で、永続ログに
+//   時刻の無い行が残っていた（M14 で実測）。
+const warn = (...a) => console.warn(`[${ts()}]`, ...a);
 
 export class StateSync {
   constructor(
@@ -87,10 +91,14 @@ export class StateSync {
         if (this._stopped) return;
         this._setUpstream(false); // 本体不達（初期/再接続同期の失敗もSSE切断もここへ来る）
         const msg = e instanceof ClientError ? e.message : `想定外: ${e?.message ?? e}`;
-        log(`[sync] SSE切断/エラー: ${msg} → ${Math.round(backoff / 1000)}秒後に再接続`);
+        // ★予定（「N秒後に再接続」）は書かない（M15・J2）。止められれば再接続は起きない。
+        // 起きた事だけを書き、待ち終えたことは下で別の行にする（CLAUDE.md §10）。
+        log(`[sync] SSE切断/エラー: ${msg}`);
       }
       if (this._stopped) return;
       await this._sleep(backoff);
+      if (this._stopped) return;
+      log(`[sync] 切断後の待機 ${Math.round(backoff / 1000)}秒が明けた`);
       backoff = Math.min(backoff * 2, BACKOFF_MAX_MS);
     }
   }
@@ -101,14 +109,16 @@ export class StateSync {
       // ★instanceごとに初回1回だけ警告する（M11・S2-1候補②-1）。
       // エンドポイント構成は起動時に1回だけ構築され以後更新されないため、本体側で灯が
       // 増設されるとその灯がイベントを出すたびに永続ログ(error_addon.log)へ無制限に
-      // 積もっていた（S2-1が特定した唯一の非有界経路）。初回のみに絞れば
-      // 「新しい灯を検知したが未反映＝要再起動」という診断価値を残したまま累積が止まる。
-      // ※stdoutへ落とす案もあったが、それでは永続ログから痕跡が消えて気付けなくなるため
-      //   初回1回のWARNを残す方を採った。Setは再起動でクリアされる＝再発時は再度1行出る。
+      // 積もっていた（S2-1が特定した唯一の非有界経路）。初回のみに絞れば痕跡を残したまま
+      // 累積が止まる。Setは再起動でクリアされる＝再発時は再度1行出る。
+      // ★文言は事実だけにする（M15・J1）。以前は「反映には再起動が必要」と対処まで書いて
+      //   いたが、本体の一覧に無い instance なら再起動しても現れない（M14 で実測: 永続ログに
+      //   残る instance 11/12 は、いまの /api/lights に無い）。灯の増減への追従は、本体が
+      //   「設定の再取得」の成功後に稼働中のアドオンを再起動することで担保される。
       if (!this._unknownReported.has(event.instance)) {
         this._unknownReported.add(event.instance);
-        console.warn(
-          `[sync] 未知instanceのイベントをスキップ（このinstanceの警告は初回のみ・反映には再起動が必要）: ${JSON.stringify(event)}`,
+        warn(
+          `WARN [sync] 本体の一覧に無い instance のイベントを捨てた（この instance の警告は初回のみ）: ${JSON.stringify(event)}`,
         );
       }
       return;
@@ -143,17 +153,23 @@ export class StateSync {
     log(`[sync] 全同期実行: ${states.length}灯`);
   }
 
+  // ★待ち終えたら abort リスナーを外す（M15・G1）。
+  // { once:true } は「発火したら外れる」だけなので、発火しない限り AbortController に
+  // 溜まり続けていた（本体が落ちている間は30秒ごとに1件・実測1件約531B＝1日約1.5MB）。
+  // MaxListenersExceededWarning は出ない（Node 22 で実測）ので、ログでは気付けなかった。
   _sleep(ms) {
     return new Promise((resolve) => {
-      const t = setTimeout(resolve, ms);
-      this._abort?.signal.addEventListener(
-        "abort",
-        () => {
-          clearTimeout(t);
-          resolve();
-        },
-        { once: true },
-      );
+      const signal = this._abort?.signal;
+      let timer;
+      const onAbort = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      timer = setTimeout(() => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      }, ms);
+      signal?.addEventListener("abort", onAbort, { once: true });
     });
   }
 }

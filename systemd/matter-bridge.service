@@ -2,7 +2,8 @@
 Description=EchoBridge Matter Bridge (addon)
 # 本体とネット到達後に開始。ただし Requires= は入れない設計判断（HAP版と同じ）:
 # 本体restart時にアドオンを道連れにしない（SSE再接続で自律復旧できることはM3で実証済み）。
-# 本体不達で起動した場合は index.js が異常終了 → Restart=on-failure が起動順を担保する。
+# 本体不達で起動した場合は index.js が終了せずに待つ（M13・src/startup.js）＝起動順はそれが担保する。
+# （M12 までは異常終了 → Restart=on-failure で約5秒ごとに再起動し、そのたびに WARN が1行積もっていた。）
 After=network-online.target echobridge-shortcut-api.service
 Wants=network-online.target
 
@@ -13,6 +14,8 @@ WorkingDirectory=%REPO%
 # 起動時ローテ: error_addon.log が1MB超なら .old へ退避（世代1・上書き）。
 # systemdがStandardErrorでファイルを開く前に走るためappendのinode問題を踏まない。
 # クラッシュループでも再起動毎に走るので最悪1MB+αで頭打ち。%%s はunit内で%sへ復元される。
+# 稼働中の上限は src/errlog.js が持つ（1MB超で .old へ写して fd を切り詰める・M12・§6-2）。
+# この行は、C++ 層の致命的エラーのように Node の判定を通らずに終わった場合の受け皿として残す。
 ExecStartPre=/bin/sh -c '[ -f %REPO%/data/error_addon.log ] && [ $(stat -c%%s %REPO%/data/error_addon.log) -gt 1048576 ] && mv -f %REPO%/data/error_addon.log %REPO%/data/error_addon.log.old || true'
 # ログの権限を data/ の他の生成物（status.json・qr.svg＝600）と揃える。
 # StandardError=append: は mode を指定できず、systemd が新規作成すると root:root 644 になる。
@@ -37,10 +40,24 @@ StandardError=append:%REPO%/data/error_addon.log
 # 同一機なら本体がループバック接続を認証の検査対象外にするためトークンは不要＝env自体が不要。
 # "-" でファイル不在でも起動する（同一機運用では不在が既定）。
 EnvironmentFile=-%REPO%/data/env
+# 想定外の異常終了の受け皿（本体不達はここに来ない）。
+# ★75 = 工場出荷リセット後の意図した自己終了（M15・S1・src/index.js の EXIT_RESTART_AFTER_RESET）。
+#   ホームアプリから削除されると matter.js が自分でリセットし、その際エンドポイントの
+#   購読が外れる（M14 で実測）。アドオンは新しい PIN/QR を書いて close してから 75 で終え、
+#   この Restart=on-failure に上げ直させる＝新しいプロセスで購読が全部貼り直る。
+#   非0にしてあるのは、この行に拾わせるため（正常終了では上がり直さない）。
 Restart=on-failure
 RestartSec=5
+# 78 = 移行前の新コード起動（旧 data/ にだけペアリング情報がある・src/storage.js）。
+# 再起動しても直らない（人が移行するまで待つ）ので、再起動ループにしない。
+# （75 はここに入れない＝上がり直させたいので防がない。）
+RestartPreventExitStatus=78
 # cgroup実効化後の実測に基づく（起動直後RSS≈120MiB・MemoryCurrentは
 # node_modulesページキャッシュ込み≈180MiB・上限接近時はキャッシュが先に回収される）。
+# 測定機体: dev 機。RSS≈120MiB に一致する記録は DEV_LOG M4（2026-07-17。cgroup memory が
+# 有効になった M5・2026-07-19 より前の測定）。MemoryCurrent≈180MiB は DEV_LOG に記録が無く、
+# 測定日は辿れない（300M へ改めたのは 2026-07-19・M5）。
+# 当時の dev 機の機種は記録に無い（不明）。別機体（Pi4 1GB の⑦機など）の判断材料にしないこと。
 MemoryMax=300M
 # 本体(未設定=0)より先にkillされる側＝「逼迫時に死ぬのはアドオン側」(CLAUDE.md §4)の実装。
 OOMScoreAdjust=500
