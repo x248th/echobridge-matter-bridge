@@ -40,9 +40,10 @@ prepare_addon_data() {
     local user="$1" home="$2"
     local root="$home/addon-data"
     local dir="$root/$ADDON_ID"
+    local other_owner=""
     if [ ! -d "$root" ]; then
         mkdir -p "$root"
-        chown "$user" "$root"
+        chown "$user:$user" "$root"
         echo "==> 作成: $root（所有者 $user）"
     fi
     if [ ! -d "$dir" ]; then
@@ -53,7 +54,8 @@ prepare_addon_data() {
         # 旧い移行案内の `mkdir -p` は umask 既定（0755）で作るため、その手順を踏んだ機体では
         # 子が 0755 のまま残り、matter.js が 0644 で置く passcode や NOC 秘密鍵が
         # 同一機の他ユーザから読めていた（M12 第2段の記録に実例がある）。
-        # 所有者がサービス実行ユーザでないディレクトリには触らない（他人のものを触らない）。
+        # 所有者がサービス実行ユーザでないときは、パーミッションと中身を変えず、所有者と group だけを
+        # 下の chown で直す（§6-1: 所有者はサービス実行ユーザ）。
         local owner mode
         owner="$(stat -c %U "$dir" 2>/dev/null || echo "")"
         if [ "$owner" = "$user" ]; then
@@ -63,10 +65,15 @@ prepare_addon_data() {
                 echo "==> パーミッションをそろえた: $dir（$mode → 700）"
             fi
         else
-            echo "==> 所有者が $user ではないので触らない: $dir（所有者 ${owner:-不明}）" >&2
+            other_owner=1
+            echo "==> 所有者が ${owner:-不明} で $user ではないので、パーミッションは変えない: $dir" >&2
         fi
     fi
-    chown "$user" "$dir"
+    chown "$user:$user" "$dir"
+    # set -e なので、ここまで来れば chown は成功している（§10: 起きた事だけを書く）。
+    if [ -n "$other_owner" ]; then
+        echo "==> 所有者と group を $user に直した: $dir（中身は変えていない）" >&2
+    fi
     echo "==> ペアリング情報の置き場所: $dir（アンインストールしても残る）"
 }
 
@@ -151,21 +158,21 @@ fi
 # 2. data/（status.json・qr.svg・error_addon.log の置き場。gitignore済み。アンインストールで消える）
 #    ペアリング/fabric 等の永続状態は data/ ではなく下の 2b（~/addon-data/matter-bridge/）に置く。
 mkdir -p "$REPO_DIR/data"
-chown "$USER_NAME" "$REPO_DIR/data"
+chown "$USER_NAME:$USER_NAME" "$REPO_DIR/data"
 # error_addon.log の所有権と権限を揃える（M11）。
 # systemd の StandardError=append: は mode を指定できず、systemd が新規作成すると
 # root:root 644 になる（status.json・qr.svg は 600 なので非対称だった）。
 # unit側の ExecStartPre でも 600 を立てるが、そちらは User= 権限で走るため
 # 旧版が root所有で作った既存ファイルには chmod できない。ここ（root権限）で移行させる。
 touch "$REPO_DIR/data/error_addon.log"
-chown "$USER_NAME" "$REPO_DIR/data/error_addon.log"
+chown "$USER_NAME:$USER_NAME" "$REPO_DIR/data/error_addon.log"
 chmod 600 "$REPO_DIR/data/error_addon.log"
 
 # data/env（本体を別機に置く構成のトークン）は在れば 600 にする（M15・H3）。
 # data/ は 0755 なので、644 のままだと同一機の他ユーザからトークンが読める。
 # 作りはしない（同一機運用では不在が既定）。
 if [ -f "$REPO_DIR/data/env" ]; then
-    chown "$USER_NAME" "$REPO_DIR/data/env"
+    chown "$USER_NAME:$USER_NAME" "$REPO_DIR/data/env"
     chmod 600 "$REPO_DIR/data/env"
     echo "==> data/env の権限をそろえた（600）"
 fi

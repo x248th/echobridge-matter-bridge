@@ -10,6 +10,7 @@ import { DATA_DIR, ERROR_LOG, ERROR_LOG_OLD, NODE_ID, STORAGE_DIR, repoRoot } fr
 import { LegacyStorageError, prepareStorage } from "./storage.js";
 import { installErrorLogCap } from "./errlog.js";
 import { waitForUpstream } from "./startup.js";
+import { ts } from "./logtime.js";
 import {
   vendorId,
   productId,
@@ -22,7 +23,6 @@ import {
   softwareVersionFrom,
 } from "./identity.js";
 
-const ts = () => new Date().toISOString();
 const log = (...a) => console.log(`[${ts()}]`, ...a);
 // WARN相当は stderr へ（systemd の StandardError=append:data/error_addon.log に載る）。
 const warn = (...a) => console.warn(`[${ts()}]`, ...a);

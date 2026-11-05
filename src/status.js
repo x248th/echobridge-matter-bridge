@@ -12,6 +12,8 @@ import { join } from "node:path";
 
 import QRCode from "qrcode";
 
+import { ts } from "./logtime.js";
+
 // service は systemdユニット名かつ本体の ADDON_SERVICE_WHITELIST と一致必須（不一致＝トグル不能）。
 const SERVICE = "matter-bridge";
 // display_name は本体の走査ベース表示に使う種別名（HAP版アドオンの "HomeKit" と対の位置づけ）。
@@ -34,7 +36,6 @@ const PAIRED_LABEL = "ペアリングシステム数";
 // status.js は @matter/* を import しない（テストで ServerNode を作らずに済ませるため）ので数値で持つ。
 const WINDOW_NOT_OPEN = 0;
 
-const ts = () => new Date().toISOString();
 const log = (...a) => console.log(`[${ts()}]`, ...a);
 // WARN相当は stderr へ（systemd の StandardError=append:data/error_addon.log に載る）。
 const warn = (...a) => console.warn(`[${ts()}]`, ...a);

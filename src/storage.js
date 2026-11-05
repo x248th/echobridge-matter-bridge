@@ -4,13 +4,13 @@ import { existsSync } from "node:fs";
 import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import { ts } from "./logtime.js";
 import { IDENTITY_FILE, LEGACY_NODE_STORAGE, NODE_STORAGE, STORAGE_DIR, repoRoot } from "./paths.js";
 
 // 2 で matter_version を足した（M15・T1）。1 の記録も読めるまま（読めたら 2 へ書き直す）。
 export const IDENTITY_SCHEMA_VERSION = 2;
 const READABLE_SCHEMA_VERSIONS = new Set([1, 2]);
 
-const ts = () => new Date().toISOString();
 const defaultLog = (...a) => console.log(`[${ts()}]`, ...a);
 const defaultWarn = (...a) => console.warn(`[${ts()}]`, ...a);
 const hex = (n) => `0x${Number(n).toString(16).toUpperCase().padStart(4, "0")}`;

@@ -9,10 +9,11 @@ import { OnOffLightDevice } from "@matter/main/devices/on-off-light";
 import { OnOffPlugInUnitDevice } from "@matter/main/devices/on-off-plug-in-unit";
 import { BridgedDeviceBasicInformationServer } from "@matter/main/behaviors/bridged-device-basic-information";
 
+import { ts } from "./logtime.js";
+
 const LEVEL_DEBOUNCE_MS = 300;
 const SCENE_AUTO_OFF_MS = 300;
 
-const ts = () => new Date().toISOString();
 const log = (...a) => console.log(`[${ts()}]`, ...a);
 // WARN相当は stderr へ（systemd の StandardError=append:data/error_addon.log に載る）。
 const warn = (...a) => console.warn(`[${ts()}]`, ...a);

@@ -1,12 +1,12 @@
 // client: EchoBridge本体API(:8099)へのHTTPシム。通信はHTTPのみ・URLは ECHOBRIDGE_URL 注入。
 // Node標準 fetch のみ（新規npm依存を追加しない）。移植元: hap-bridge/hap_bridge/client.py。
+import { ts } from "./logtime.js";
 import { createThrottle } from "./throttle.js";
 
 const DEFAULT_BASE_URL = "http://127.0.0.1:8099";
 const REQUEST_TIMEOUT_MS = 10_000;
 const SSE_IDLE_TIMEOUT_MS = 60_000; // 無受信60秒(本体keepalive30秒×2欠落)で切断とみなす
 
-const ts = () => new Date().toISOString();
 // WARN相当は stderr へ（systemd の StandardError=append:data/error_addon.log に載る）。
 // ★時刻と WARN を付ける（M15・C2）。§6-2 で本体が貼るのは末尾20行なので、時刻が無いと突合できない。
 const warn = (...a) => console.warn(`[${ts()}]`, ...a);

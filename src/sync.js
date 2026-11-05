@@ -1,13 +1,17 @@
 // sync: 本体 /api/events(SSE) を購読し外部操作の状態変化をMatterタイルへ反映する。
 // 契約（移植元 hap-bridge/hap_bridge/sync.py）: 初期全同期 → SSE購読 → 切断時 指数バックオフ
 // 再接続 → 再接続時 full_sync → 5分保険ポーリング。切断中の取りこぼしは再接続時 full_sync で回収。
+import { performance } from "node:perf_hooks";
+
 import { ClientError } from "./client.js";
+import { ts } from "./logtime.js";
 
 const BACKOFF_START_MS = 1_000;
 const BACKOFF_MAX_MS = 30_000;
 const FULL_SYNC_INTERVAL_MS = 300_000; // 5分保険
+// 保険の間隔は単調時計で測る（M-5）。壁時計だと、時計が戻った分だけ保険の全同期が止まる。
+const monotonicNow = () => performance.now();
 
-const ts = () => new Date().toISOString();
 const log = (...a) => console.log(`[${ts()}]`, ...a);
 // WARN相当は stderr へ（systemd の StandardError=append:data/error_addon.log に載る）。
 // ★時刻と WARN を付ける（M15・C2）。以前はここだけ素の console.warn で、永続ログに
@@ -18,14 +22,15 @@ export class StateSync {
   constructor(
     client,
     lightsByInstance,
-    { fullSyncIntervalMs = FULL_SYNC_INTERVAL_MS, upstream = null, onUpstreamChange = null } = {},
+    { fullSyncIntervalMs = FULL_SYNC_INTERVAL_MS, upstream = null, onUpstreamChange = null, now = monotonicNow } = {},
   ) {
     this._client = client;
     this._lights = lightsByInstance;
     this._fullSyncIntervalMs = fullSyncIntervalMs;
     this._stopped = false;
     this._abort = null;
-    this._lastFullSync = 0;
+    this._now = now;
+    this._lastFullSync = -Infinity; // 未実行＝常に期限切れ（単調時計は 0 付近から始まるので 0 は使えない）
     this._loop = null;
     // 既に警告した未知instance（M11・S2-1候補②-1）。同一instanceの2回目以降は黙る。
     this._unknownReported = new Set();
@@ -128,7 +133,7 @@ export class StateSync {
   }
 
   async _maybeFullSync() {
-    if (Date.now() - this._lastFullSync < this._fullSyncIntervalMs) return;
+    if (this._now() - this._lastFullSync < this._fullSyncIntervalMs) return;
     try {
       await this._fullSync();
     } catch (e) {
@@ -148,7 +153,7 @@ export class StateSync {
         await light.applyState({ is_on: st.is_on, brightness: st.brightness });
       }
     }
-    this._lastFullSync = Date.now();
+    this._lastFullSync = this._now();
     this._setUpstream(true); // 本体到達（＝この時刻が最終成功時刻になる）
     log(`[sync] 全同期実行: ${states.length}灯`);
   }
