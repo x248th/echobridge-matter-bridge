@@ -1,6 +1,7 @@
 // M4: 実照明10灯＋シーン16を Matter に露出し、本体WebUI契約(status.json/qr.svg)を書く。配線のみ。
-import { Environment, ServerNode, Endpoint, VendorId } from "@matter/main";
+import { Environment, ServerNode, Endpoint, VendorId, Lifecycle } from "@matter/main";
 import { AggregatorEndpoint } from "@matter/main/endpoints/aggregator";
+import { FabricManager, FailsafeContext } from "@matter/main/protocol";
 
 import { EchoBridgeClient } from "./client.js";
 import { buildBridge } from "./devices.js";
@@ -11,6 +12,7 @@ import { LegacyStorageError, prepareStorage } from "./storage.js";
 import { installErrorLogCap } from "./errlog.js";
 import { waitForUpstream } from "./startup.js";
 import { ts } from "./logtime.js";
+import { installKeychainCleanup, matterAccessors } from "./keychain_cleanup.js";
 import {
   vendorId,
   productId,
@@ -49,6 +51,7 @@ const SHUTDOWN_TIMEOUT_MS = 15_000;
 let server = null;
 let sync = null;
 let stopStatusWriter = () => {};
+let stopKeychainCleanup = () => {};
 let closing = false;
 const shutdown = async (reason, code = 0) => {
   if (closing) return;
@@ -59,6 +62,7 @@ const shutdown = async (reason, code = 0) => {
     process.exit(code);
   }, SHUTDOWN_TIMEOUT_MS);
   try {
+    stopKeychainCleanup();
     stopStatusWriter();
     if (sync) await sync.stop();
     if (server) {
@@ -196,6 +200,16 @@ try {
   refreshStatus = writer.refresh;
 } catch (e) {
   warn(`WARN 状態ファイルの書き出しに失敗（ブリッジは継続）: ${e?.message ?? e}`);
+}
+
+// ★ホームアプリから削除されたあと Apple Keychain の登録だけが残ったら消す（M-1・keychain_cleanup.js）。
+//   消すと fabric が0件になり、matter.js の工場出荷リセット → 上の onResetComplete の経路に乗る。
+//   起動時には判定しない（すでに Keychain だけが残っている機体は、この仕組みでは救わない）。
+try {
+  const cleanup = installKeychainCleanup({ ...matterAccessors(server, { FabricManager, FailsafeContext, Lifecycle }), log, warn });
+  stopKeychainCleanup = cleanup.stop;
+} catch (e) {
+  warn(`WARN Keychain の後始末を仕掛けられなかった（ブリッジは継続）: ${e?.message ?? e}`);
 }
 
 // 状態同期ワーカー起動（初期全同期→SSE購読→再接続→保険ポーリング）。

@@ -194,10 +194,13 @@ export async function removeQr(dataDir) {
  *
  * ★pin（と QR）は未登録のときだけ出す（M13）。登録済みの間は元のコードでは登録できない
  *   （fabric が残っていると commissioning window を開かない・DEV_LOG M12 第1段3.）。
- * ★ホームアプリから削除されて fabric が0件になると、matter.js は工場出荷リセットでストレージを消し、
+ * ★fabric が0件になると、matter.js は工場出荷リセットでストレージを消し、
  *   PIN と QR を作り直す（@matter/node CommissioningServer.js の handleFabricChange →
- *   #triggerFactoryReset → ServerNode.erase。作り直しは M13 で実測）。decommissioned の時点の
+ *   #triggerFactoryReset → ServerNode.erase。作り直しは M13 の start しない試験で確かめ、
+ *   全段は⑦機の実機で通った〔2026-11-06・人間の報告〕）。decommissioned の時点の
  *   コードはリセットで捨てられる古いものなので、リセット後にオンラインへ戻るまで pin を出さない。
+ *   ★Apple Home はブリッジを削除しても Keychain の fabric（0x1384）を残すので、それだけでは0件に
+ *   ならない。残りが Keychain だけになったら keychain_cleanup.js が消して0件にする（M-1）。
  * ★onResetComplete: 工場出荷リセットのあと再びオンラインになり、新しい PIN/QR を
  *   status.json・qr.svg へ書き終えてから1回だけ呼ぶ（M15・S1）。呼び出し側（index.js）は
  *   ここでプロセスを終えて systemd に起動し直させ、エンドポイントの購読を貼り直す。
@@ -216,6 +219,16 @@ export async function startStatusWriter({ server, repoRoot, dataDir, upstream = 
     // fabrics 生配列から算出: paired_clients=Keychain除外数 / fabrics_total=総数。
     const fabrics = server.state.operationalCredentials.fabrics ?? [];
     const acceptsCommissioning = !server.lifecycle.isCommissioned && !resetPending;
+    // ログに書く pin の扱い（判断29）。出さない理由は2通り: 工場出荷リセット待ち（resetPending）と
+    // 登録済み（isCommissioned）。以前は両方を「登録済み」と書いていた（§10 に反する）。
+    // ★ここで決めておく（下の await の間に resetPending が変わっても、判定したときの理由を書く）。
+    // ★両方が真になることは無い（decommissioned で isCommissioned が先に false になる・
+    //   @matter/node NodeLifecycle.js:31-33）が、もし重なればリセット待ちを書く。
+    const pinNote = acceptsCommissioning
+      ? "出す（未登録）"
+      : resetPending
+        ? "出さない（工場出荷リセット待ち）"
+        : "出さない（登録済み）";
     let pin = null;
     if (acceptsCommissioning) {
       const { manualPairingCode, qrPairingCode } = server.state.commissioning.pairingCodes;
@@ -250,7 +263,7 @@ export async function startStatusWriter({ server, repoRoot, dataDir, upstream = 
       await writeStatus(dataDir, current);
       last = current; // 書けた時だけ更新＝失敗は次の変化で再試行される
       log(
-        `status.json更新: paired_clients=${current.paired_clients} fabrics_total=${current.fabrics_total} version=${current.version} pin=${"pin" in current ? "出す（未登録）" : "出さない（登録済み）"} pairing_window_open=${current.pairing_window_open}`,
+        `status.json更新: paired_clients=${current.paired_clients} fabrics_total=${current.fabrics_total} version=${current.version} pin=${pinNote} pairing_window_open=${current.pairing_window_open}`,
       );
     } catch (e) {
       warn(`WARN status.json書き出しに失敗（継続）: ${e?.message ?? e}`);
